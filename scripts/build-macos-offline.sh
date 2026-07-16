@@ -216,13 +216,23 @@ else
 fi
 [ -d "$APP_SOURCE" ] || fail "Desktop app not found: $APP_SOURCE"
 NATIVE_LIST="$WORK_DIR/desktop-native-modules.txt"
+DESKTOP_ENTITLEMENTS="$HERMES_SOURCE_DIR/apps/desktop/electron/entitlements.mac.plist"
+DESKTOP_INHERIT_ENTITLEMENTS="$HERMES_SOURCE_DIR/apps/desktop/electron/entitlements.mac.inherit.plist"
 find "$APP_SOURCE/Contents/Resources" -type f -name '*.node' -print > "$NATIVE_LIST"
-[ -s "$NATIVE_LIST" ] || fail "Desktop node-pty native binary missing"
+[ -s "$NATIVE_LIST" ] || fail "Packaged Desktop native module missing"
 while IFS= read -r native_module; do
-  codesign --force --sign - "$native_module"
+  codesign --force --options runtime --entitlements "$DESKTOP_INHERIT_ENTITLEMENTS" --sign - "$native_module"
 done < "$NATIVE_LIST"
-codesign --force --deep --sign - "$APP_SOURCE"
+codesign --force --deep --options runtime --entitlements "$DESKTOP_INHERIT_ENTITLEMENTS" --sign - "$APP_SOURCE"
+codesign --force --options runtime --entitlements "$DESKTOP_ENTITLEMENTS" --sign - "$APP_SOURCE"
 codesign --verify --deep --strict "$APP_SOURCE"
+codesign -d --entitlements :- "$APP_SOURCE" 2>&1 | grep -F 'com.apple.security.cs.allow-jit' >/dev/null || \
+  fail "Desktop app signature is missing allow-jit entitlement"
+DESKTOP_HELPER="$(find "$APP_SOURCE/Contents/Frameworks" -type d -name '* Helper.app' | head -1)"
+[ -d "$DESKTOP_HELPER" ] || fail "Desktop Helper.app missing"
+codesign -d --entitlements :- "$DESKTOP_HELPER" 2>&1 | grep -F 'com.apple.security.cs.allow-jit' >/dev/null || \
+  fail "Desktop Helper signature is missing allow-jit entitlement"
+
 APP_BINARY="$APP_SOURCE/Contents/MacOS/Hermes"
 file -b "$APP_BINARY"
 lipo "$APP_BINARY" -verify_arch "$EXPECTED_MACHINE"
@@ -351,14 +361,22 @@ run_install_test() {
     "$app/Contents/MacOS/Hermes" -e \
     'console.log("electron=" + process.versions.electron + " node=" + process.versions.node + " arch=" + process.arch)'
   gui_log="$test_root/electron-gui.log"
-  HERMES_HOME="$test_hermes_home" sandbox-exec -p "$sandbox_profile" \
-    "$app/Contents/MacOS/Hermes" --disable-gpu >"$gui_log" 2>&1 &
+  HERMES_HOME="$test_hermes_home" ELECTRON_ENABLE_LOGGING=1 NSUnbufferedIO=YES \
+    sandbox-exec -p "$sandbox_profile" \
+    "$app/Contents/MacOS/Hermes" --disable-gpu --enable-logging=stderr --v=1 >"$gui_log" 2>&1 &
   gui_pid=$!
   gui_wait=0
   while [ "$gui_wait" -lt 8 ]; do
     sleep 1
     kill -0 "$gui_pid" 2>/dev/null || {
       wait "$gui_pid" || true
+      echo "--- electron-gui.log ---" >&2
+      if [ -f "$gui_log" ]; then
+        /bin/cat "$gui_log" >&2
+      else
+        echo "(missing)" >&2
+      fi
+      echo "--- end electron-gui.log ---" >&2
       fail "Hermes Desktop GUI exited during startup; log=$gui_log"
     }
     gui_wait=$((gui_wait + 1))
