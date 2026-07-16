@@ -110,6 +110,14 @@ SITE_PACKAGES="$("$BUILD_VENV/bin/python" -c 'import sysconfig; print(sysconfig.
 ditto "$SITE_PACKAGES" "$PAYLOAD/site-packages"
 "$BUNDLE_PYTHON" "$ROOT/scripts/sanitize_site_packages.py" "$PAYLOAD/site-packages" \
   --forbid "$WORK_DIR" --forbid "$HERMES_SOURCE_DIR" --forbid "$PAYLOAD/hermes-agent"
+python3 "$ROOT/scripts/relocate_macho.py" "$PAYLOAD/site-packages"
+SITE_PACKAGES_RELOCATION_PROBE="$WORK_DIR/site-packages-relocation-probe"
+mv "$PAYLOAD/site-packages" "$SITE_PACKAGES_RELOCATION_PROBE"
+env -i HOME="$HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+  PYTHONPATH="$SITE_PACKAGES_RELOCATION_PROBE" \
+  "$BUNDLE_PYTHON" -c \
+  'import cryptography.hazmat.bindings._rust,grpc,numpy,pydantic_core,psutil; from PIL import _imaging; print("site-packages-relocation-probe=OK")'
+mv "$SITE_PACKAGES_RELOCATION_PROBE" "$PAYLOAD/site-packages"
 
 say "Pre-seed bundled skills without target-machine code execution"
 mkdir -p "$PAYLOAD/home-seed"
@@ -241,7 +249,9 @@ while IFS= read -r macho; do
     *Mach-O*) ;;
     *) continue ;;
   esac
-  lipo "$macho" -verify_arch "$EXPECTED_MACHINE"
+  if ! lipo "$macho" -verify_arch "$EXPECTED_MACHINE"; then
+    fail "Mach-O architecture mismatch: expected=$EXPECTED_MACHINE file=$macho info=$macho_info"
+  fi
   load_commands="$(otool -l "$macho" | sed '1d')"
   linked_libraries="$(otool -L "$macho" | sed '1d')"
   for forbidden_path in "$WORK_DIR" "$HERMES_SOURCE_DIR"; do
