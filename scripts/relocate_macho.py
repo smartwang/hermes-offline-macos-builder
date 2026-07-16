@@ -109,6 +109,24 @@ def relocate_one(binary: Path, root: Path) -> bool:
     return True
 
 
+def relativize_internal_symlinks(root: Path) -> list[Path]:
+    changed: list[Path] = []
+    for link in sorted(root.rglob("*")):
+        if not link.is_symlink():
+            continue
+        target_text = os.readlink(link)
+        if not os.path.isabs(target_text):
+            continue
+        resolved = link.resolve()
+        if not inside(str(resolved), root):
+            raise SystemExit(f"absolute symlink escapes relocation root: {link} -> {target_text}")
+        relative = os.path.relpath(resolved, link.parent)
+        link.unlink()
+        link.symlink_to(relative, target_is_directory=resolved.is_dir())
+        changed.append(link)
+    return changed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
@@ -117,13 +135,16 @@ def main() -> int:
     if not root.is_dir():
         raise SystemExit(f"runtime root not found: {root}")
 
+    symlinks = relativize_internal_symlinks(root)
     changed: list[Path] = []
     for path in sorted(root.rglob("*")):
         candidate = path.suffix in {".so", ".dylib"} or os.access(path, os.X_OK)
         if path.is_file() and candidate and relocate_one(path, root):
             changed.append(path)
 
-    print(f"macho-relocation: changed={len(changed)}")
+    print(f"macho-relocation: changed={len(changed)} symlinks={len(symlinks)}")
+    for path in symlinks:
+        print(f"  symlink {path.relative_to(root)} -> {os.readlink(path)}")
     for path in changed:
         print(f"  {path.relative_to(root)}")
     return 0

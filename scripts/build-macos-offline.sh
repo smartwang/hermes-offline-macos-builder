@@ -252,12 +252,16 @@ while IFS= read -r macho; do
   if ! lipo "$macho" -verify_arch "$EXPECTED_MACHINE"; then
     fail "Mach-O architecture mismatch: expected=$EXPECTED_MACHINE file=$macho info=$macho_info"
   fi
-  if ! load_commands="$(otool -l "$macho" | sed '1d')"; then
+  if ! otool_load_raw="$(otool -l "$macho")"; then
     fail "otool -l failed: $macho"
   fi
-  if ! linked_libraries="$(otool -L "$macho" | sed '1d')"; then
+  if ! otool_link_raw="$(otool -L "$macho")"; then
     fail "otool -L failed: $macho"
   fi
+  load_commands="$(printf '%s\n' "$otool_load_raw" | \
+    grep -E '^[[:space:]]+(name|path) ' || true)"
+  linked_libraries="$(printf '%s\n' "$otool_link_raw" | \
+    grep -E '^[[:space:]]+(/|@)' || true)"
   for forbidden_path in "$WORK_DIR" "$HERMES_SOURCE_DIR"; do
     forbidden_metadata="$(printf '%s\n%s\n' "$load_commands" "$linked_libraries" | \
       grep -F -m 1 "$forbidden_path" || true)"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,12 @@ from manifest_tool import (  # noqa: E402
     verify_manifest,
 )
 from sanitize_site_packages import symlink_escapes_root  # noqa: E402
-from relocate_macho import inside, loader_relative, remap_target  # noqa: E402
+from relocate_macho import (  # noqa: E402
+    inside,
+    loader_relative,
+    relativize_internal_symlinks,
+    remap_target,
+)
 
 
 class ManifestToolTests(unittest.TestCase):
@@ -136,6 +142,20 @@ class RelocateMachoTests(unittest.TestCase):
             target.touch()
             old = base / "deps-venv" / "lib" / "python3.11" / "site-packages" / "pkg" / "native.so"
             self.assertEqual(remap_target(str(old), root), target.resolve())
+
+    def test_absolute_internal_symlink_becomes_relative(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve() / "runtime"
+            target = root / "cpython-3.11.15"
+            target.mkdir(parents=True)
+            link = root / "cpython-3.11"
+            try:
+                link.symlink_to(target, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symlink creation unavailable: {error}")
+            self.assertEqual(relativize_internal_symlinks(root), [link])
+            self.assertEqual(os.readlink(link), "cpython-3.11.15")
+            self.assertEqual(link.resolve(), target.resolve())
 
 
 if __name__ == "__main__":
