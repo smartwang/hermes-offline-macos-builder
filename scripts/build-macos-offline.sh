@@ -116,7 +116,7 @@ mv "$PAYLOAD/site-packages" "$SITE_PACKAGES_RELOCATION_PROBE"
 env -i HOME="$HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
   PYTHONPATH="$SITE_PACKAGES_RELOCATION_PROBE" \
   "$BUNDLE_PYTHON" -c \
-  'import cryptography.hazmat.bindings._rust,numpy,pydantic_core,psutil; from PIL import _imaging; print("site-packages-relocation-probe=OK")'
+  'import charset_normalizer.md,charset_normalizer.md__mypyc,cryptography.hazmat.bindings._rust,google._upb._message,uvloop.loop; print("site-packages-relocation-probe=OK")'
 mv "$SITE_PACKAGES_RELOCATION_PROBE" "$PAYLOAD/site-packages"
 
 say "Pre-seed bundled skills without target-machine code execution"
