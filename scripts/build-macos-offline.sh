@@ -158,22 +158,37 @@ find "$NODE_PTY_PREBUILD_DIR" -type f -name '*.node' -print | while IFS= read -r
 done
 [ -n "$(find "$NODE_PTY_PREBUILD_DIR" -type f -name '*.node' -print -quit)" ] || \
   fail "Pinned node-pty prebuild contains no native module"
-say "Run Desktop build without network using pinned N-API prebuilds"
+say "Build Desktop renderer and stage pinned N-API prebuilds without network"
 DESKTOP_PACKAGE_JSON="$HERMES_SOURCE_DIR/apps/desktop/package.json"
 DESKTOP_PACKAGE_BACKUP="$WORK_DIR/desktop-package.json.original"
+(cd "$HERMES_SOURCE_DIR/apps/desktop" && \
+  GITHUB_SHA="$HERMES_COMMIT_EXPECTED" GITHUB_REF_NAME="$HERMES_REF" \
+  CSC_IDENTITY_AUTO_DISCOVERY=false sandbox-exec -p "$NO_NETWORK_PROFILE" npm run build)
+"$BUNDLE_PYTHON" - "$HERMES_SOURCE_DIR/apps/desktop/build/install-stamp.json" \
+  "$HERMES_COMMIT_EXPECTED" <<'PY'
+import json, pathlib, sys
+stamp = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if stamp.get("commit") != sys.argv[2] or stamp.get("dirty") is not False:
+    raise SystemExit(f"invalid Desktop install stamp: {stamp}")
+print(f"desktop-install-stamp=OK {stamp['commit']}")
+PY
+
+say "Package Desktop without scanning bundled renderer dependencies"
 cp "$DESKTOP_PACKAGE_JSON" "$DESKTOP_PACKAGE_BACKUP"
-python3 - "$DESKTOP_PACKAGE_JSON" "$ELECTRON_PACKAGE_DIR/dist" <<'PY'
+python3 - "$DESKTOP_PACKAGE_JSON" "$ELECTRON_PACKAGE_DIR/dist" "$ELECTRON_VERSION" <<'PY'
 import json, pathlib, sys
 path = pathlib.Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
+data["dependencies"] = {}
+data["optionalDependencies"] = {}
 data["build"]["electronDist"] = sys.argv[2]
+data["build"]["electronVersion"] = sys.argv[3]
 data["build"]["npmRebuild"] = False
+data["build"]["nodeGypRebuild"] = False
 path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
 (cd "$HERMES_SOURCE_DIR/apps/desktop" && CSC_IDENTITY_AUTO_DISCOVERY=false \
-  sandbox-exec -p "$NO_NETWORK_PROFILE" npm run build)
-(cd "$HERMES_SOURCE_DIR/apps/desktop" && CSC_IDENTITY_AUTO_DISCOVERY=false \
-  sandbox-exec -p "$NO_NETWORK_PROFILE" npm run builder -- --dir)
+  sandbox-exec -p "$NO_NETWORK_PROFILE" npm run builder -- --dir --publish never)
 cp "$DESKTOP_PACKAGE_BACKUP" "$DESKTOP_PACKAGE_JSON"
 [ -z "$(git -C "$HERMES_SOURCE_DIR" status --porcelain -- apps/desktop/package.json)" ] || \
   fail "Desktop package.json was not restored"
