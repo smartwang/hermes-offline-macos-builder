@@ -16,7 +16,7 @@ from manifest_tool import (  # noqa: E402
     verify_manifest,
 )
 from sanitize_site_packages import symlink_escapes_root  # noqa: E402
-from relocate_macho import inside, loader_relative  # noqa: E402
+from relocate_macho import inside, loader_relative, remap_target  # noqa: E402
 
 
 class ManifestToolTests(unittest.TestCase):
@@ -126,6 +126,16 @@ class RelocateMachoTests(unittest.TestCase):
             root = Path(temp).resolve() / "runtime"
             self.assertTrue(inside(str(root / "lib" / "safe.dylib"), root))
             self.assertFalse(inside(str(root.parent / "outside.dylib"), root))
+
+    def test_remap_target_maps_build_venv_site_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            root = base / "payload" / "site-packages"
+            target = root / "pkg" / "native.so"
+            target.parent.mkdir(parents=True)
+            target.touch()
+            old = base / "deps-venv" / "lib" / "python3.11" / "site-packages" / "pkg" / "native.so"
+            self.assertEqual(remap_target(str(old), root), target.resolve())
 
 
 if __name__ == "__main__":

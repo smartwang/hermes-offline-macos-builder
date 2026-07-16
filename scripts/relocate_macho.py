@@ -22,8 +22,23 @@ def inside(path_text: str, root: Path) -> bool:
         return False
 
 
-def loader_relative(target: str, binary: Path) -> str:
-    relative = os.path.relpath(target, binary.parent)
+def remap_target(path_text: str, root: Path) -> Path | None:
+    """Map a pre-copy absolute path to the equivalent object under root."""
+    source = Path(path_text)
+    if inside(path_text, root):
+        return source.resolve()
+    parts = source.parts
+    for marker in (root.name, "site-packages"):
+        positions = [index for index, part in enumerate(parts) if part == marker]
+        for index in reversed(positions):
+            candidate = root.joinpath(*parts[index + 1 :])
+            if candidate.exists():
+                return candidate.resolve()
+    return None
+
+
+def loader_relative(target: str | Path, binary: Path) -> str:
+    relative = os.path.relpath(str(target), binary.parent)
     return "@loader_path/" + relative.replace(os.sep, "/")
 
 
@@ -57,20 +72,28 @@ def relocate_one(binary: Path, root: Path) -> bool:
 
     commands: list[list[str]] = []
     for dependency in macho_dependencies(binary):
-        if dependency.startswith("/") and inside(dependency, root):
+        mapped_dependency = remap_target(dependency, root) if dependency.startswith("/") else None
+        if mapped_dependency is not None:
             commands.append(
-                ["install_name_tool", "-change", dependency, loader_relative(dependency, binary), str(binary)]
+                [
+                    "install_name_tool",
+                    "-change",
+                    dependency,
+                    loader_relative(mapped_dependency, binary),
+                    str(binary),
+                ]
             )
 
     identity = macho_id(binary)
-    if identity and identity.startswith("/") and inside(identity, root):
+    if identity and identity.startswith("/"):
         commands.append(["install_name_tool", "-id", f"@rpath/{binary.name}", str(binary)])
 
     rpaths = macho_rpaths(binary)
     replacement_rpaths = set(rpaths)
     for rpath in rpaths:
-        if rpath.startswith("/") and inside(rpath, root):
-            replacement = loader_relative(rpath, binary)
+        mapped_rpath = remap_target(rpath, root) if rpath.startswith("/") else None
+        if mapped_rpath is not None:
+            replacement = loader_relative(mapped_rpath, binary)
             if replacement != rpath:
                 commands.append(["install_name_tool", "-delete_rpath", rpath, str(binary)])
                 replacement_rpaths.discard(rpath)
