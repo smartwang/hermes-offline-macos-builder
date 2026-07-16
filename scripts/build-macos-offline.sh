@@ -341,6 +341,7 @@ run_install_test() {
   test_hermes_home="$test_home/.hermes"
   test_applications="$test_home/Applications"
   sandbox_profile='(version 1) (allow default) (deny network*)'
+  gui_sandbox_profile='(version 1) (allow default) (deny network*) (allow network* (local ip "localhost:*")) (allow network* (remote ip "localhost:*")) (allow network* (remote unix-socket))'
   rm -rf "$test_root"
   mkdir -p "$test_applications"
   sandbox-exec -p "$sandbox_profile" /usr/bin/env -i \
@@ -362,8 +363,8 @@ run_install_test() {
     'console.log("electron=" + process.versions.electron + " node=" + process.versions.node + " arch=" + process.arch)'
   gui_log="$test_root/electron-gui.log"
   HERMES_HOME="$test_hermes_home" ELECTRON_ENABLE_LOGGING=1 NSUnbufferedIO=YES \
-    sandbox-exec -p "$sandbox_profile" \
-    "$app/Contents/MacOS/Hermes" --disable-gpu --enable-logging=stderr --v=1 >"$gui_log" 2>&1 &
+    sandbox-exec -p "$gui_sandbox_profile" \
+    "$app/Contents/MacOS/Hermes" --no-sandbox --disable-gpu --enable-logging=stderr >"$gui_log" 2>&1 &
   gui_pid=$!
   gui_wait=0
   while [ "$gui_wait" -lt 8 ]; do
