@@ -148,13 +148,13 @@ mkdir -p "$ELECTRON_PACKAGE_DIR/dist"
 ditto -x -k "$DOWNLOADS/$ELECTRON_ASSET" "$ELECTRON_PACKAGE_DIR/dist"
 printf '%s' 'Electron.app/Contents/MacOS/Electron' > "$ELECTRON_PACKAGE_DIR/path.txt"
 [ "$(cat "$ELECTRON_PACKAGE_DIR/dist/version")" = "$ELECTRON_VERSION" ] || fail "Electron dist version mismatch"
-lipo -verify_arch "$EXPECTED_MACHINE" "$ELECTRON_PACKAGE_DIR/dist/Electron.app/Contents/MacOS/Electron"
+lipo "$ELECTRON_PACKAGE_DIR/dist/Electron.app/Contents/MacOS/Electron" -verify_arch "$EXPECTED_MACHINE"
 
 NO_NETWORK_PROFILE='(version 1) (allow default) (deny network*)'
 NODE_PTY_PREBUILD_DIR="$HERMES_SOURCE_DIR/node_modules/node-pty/prebuilds/darwin-$ARCH"
 [ -d "$NODE_PTY_PREBUILD_DIR" ] || fail "Pinned node-pty prebuild missing: $NODE_PTY_PREBUILD_DIR"
 find "$NODE_PTY_PREBUILD_DIR" -type f -name '*.node' -print | while IFS= read -r prebuild; do
-  lipo -verify_arch "$EXPECTED_MACHINE" "$prebuild"
+  lipo "$prebuild" -verify_arch "$EXPECTED_MACHINE"
 done
 [ -n "$(find "$NODE_PTY_PREBUILD_DIR" -type f -name '*.node' -print -quit)" ] || \
   fail "Pinned node-pty prebuild contains no native module"
@@ -187,7 +187,7 @@ codesign --force --deep --sign - "$APP_SOURCE"
 codesign --verify --deep --strict "$APP_SOURCE"
 APP_BINARY="$APP_SOURCE/Contents/MacOS/Hermes"
 file -b "$APP_BINARY"
-lipo -verify_arch "$EXPECTED_MACHINE" "$APP_BINARY"
+lipo "$APP_BINARY" -verify_arch "$EXPECTED_MACHINE"
 ELECTRON_RUNTIME_ARCH="$(ELECTRON_RUN_AS_NODE=1 sandbox-exec -p "$NO_NETWORK_PROFILE" \
   "$APP_BINARY" -p 'process.arch')"
 [ "$ELECTRON_RUNTIME_ARCH" = "$ARCH" ] || \
@@ -198,7 +198,7 @@ find "$APP_SOURCE/Contents/Resources" -type f -name '*.node' -print > "$NATIVE_L
 while IFS= read -r native_module; do
   native_info="$(file -b "$native_module")"
   printf '%s\n' "$native_info"
-  lipo -verify_arch "$EXPECTED_MACHINE" "$native_module"
+  lipo "$native_module" -verify_arch "$EXPECTED_MACHINE"
   codesign --verify --strict "$native_module"
   NATIVE_MODULE="$native_module" ELECTRON_RUN_AS_NODE=1 sandbox-exec -p "$NO_NETWORK_PROFILE" \
     "$APP_BINARY" -e \
@@ -214,7 +214,7 @@ while IFS= read -r macho; do
     *Mach-O*) ;;
     *) continue ;;
   esac
-  lipo -verify_arch "$EXPECTED_MACHINE" "$macho"
+  lipo "$macho" -verify_arch "$EXPECTED_MACHINE"
   load_commands="$(otool -l "$macho" | sed '1d')"
   linked_libraries="$(otool -L "$macho" | sed '1d')"
   for forbidden_path in "$WORK_DIR" "$HERMES_SOURCE_DIR"; do
