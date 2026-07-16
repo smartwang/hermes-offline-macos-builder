@@ -1,0 +1,100 @@
+name: Build Hermes macOS offline bundles
+
+on:
+  workflow_dispatch:
+    inputs:
+      hermes_ref:
+        description: Hermes release tag
+        required: true
+        default: v2026.7.7.2
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: hermes-macos-offline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      HERMES_REF: ${{ inputs.hermes_ref }}
+      HERMES_VERSION: 0.18.2
+      HERMES_COMMIT_EXPECTED: 9de9c25f620ff7f1ce0fd5457d596052d5159596
+      PYTHON_VERSION: 3.11.15
+      NODE_VERSION: 22.23.1
+      UV_VERSION: 0.11.29
+      RG_VERSION: 15.2.0
+
+    steps:
+      - name: Checkout offline builder
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Checkout pinned Hermes source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ inputs.hermes_ref }}
+          path: upstream
+          fetch-depth: 1
+
+      - name: Select Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: 3.11.15
+
+      - name: Run helper unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Select Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.1
+          cache: npm
+          cache-dependency-path: upstream/package-lock.json
+
+      - name: Show build host
+        run: |
+          set -eux
+          sw_vers
+          uname -a
+          node --version
+          npm --version
+          xcode-select -p
+
+      - name: Build and verify offline bundle
+        env:
+          HERMES_SOURCE_DIR: ${{ github.workspace }}/upstream
+          OUTPUT_DIR: ${{ github.workspace }}/out
+        run: /bin/bash scripts/build-macos-offline.sh '${{ matrix.arch }}'
+
+      - name: Attest final ZIP provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: out/Hermes-Offline-macOS-${{ matrix.arch }}-0.18.2.zip
+
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Hermes-Offline-macOS-${{ matrix.arch }}-0.18.2
+          path: |
+            out/Hermes-Offline-macOS-${{ matrix.arch }}-0.18.2.zip
+            out/Hermes-Offline-macOS-${{ matrix.arch }}-0.18.2.zip.sha256
+            out/Hermes-Offline-macOS-${{ matrix.arch }}-0.18.2.verification.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
