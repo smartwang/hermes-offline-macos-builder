@@ -50,7 +50,7 @@ say() { printf '\n==> %s\n' "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "Required command missing: $1"; }
 
-for cmd in curl git npm node ditto codesign shasum tar file python3 sandbox-exec otool spctl lipo; do need "$cmd"; done
+for cmd in curl git npm node ditto codesign shasum tar file python3 sandbox-exec otool spctl lipo install_name_tool; do need "$cmd"; done
 [ -d "$HERMES_SOURCE_DIR/.git" ] || fail "Hermes source checkout not found: $HERMES_SOURCE_DIR"
 
 rm -rf "$WORK_DIR" "$ZIP_PATH" "$SHA_PATH" "$VERIFY_FILE"
@@ -85,6 +85,15 @@ UV_PYTHON_INSTALL_DIR="$PAYLOAD/runtime/python" UV_PYTHON_PREFERENCE=only-manage
   "$UV" python install "$PYTHON_VERSION"
 BUNDLE_PYTHON="$(find "$PAYLOAD/runtime/python" \( -type f -o -type l \) -path '*/bin/python3.11' | head -1)"
 [ -x "$BUNDLE_PYTHON" ] || fail "Bundled Python not found"
+say "Rewrite Python Mach-O references for relocation"
+python3 "$ROOT/scripts/relocate_macho.py" "$PAYLOAD/runtime/python"
+PYTHON_RELOCATION_PROBE="$WORK_DIR/python-relocation-probe"
+ditto "$PAYLOAD/runtime/python" "$PYTHON_RELOCATION_PROBE"
+PROBE_PYTHON="$(find "$PYTHON_RELOCATION_PROBE" \( -type f -o -type l \) -path '*/bin/python3.11' | head -1)"
+[ -x "$PROBE_PYTHON" ] || fail "Relocated Python probe executable missing"
+env -i HOME="$HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+  "$PROBE_PYTHON" -c 'import hashlib,ssl,sqlite3,sys; print("python-relocation-probe=OK", sys.version)'
+rm -rf "$PYTHON_RELOCATION_PROBE"
 "$BUNDLE_PYTHON" --version
 
 say "Create clean pinned Hermes checkout"
@@ -198,6 +207,12 @@ else
   APP_SOURCE="$HERMES_SOURCE_DIR/apps/desktop/release/mac/Hermes.app"
 fi
 [ -d "$APP_SOURCE" ] || fail "Desktop app not found: $APP_SOURCE"
+NATIVE_LIST="$WORK_DIR/desktop-native-modules.txt"
+find "$APP_SOURCE/Contents/Resources" -type f -name '*.node' -print > "$NATIVE_LIST"
+[ -s "$NATIVE_LIST" ] || fail "Desktop node-pty native binary missing"
+while IFS= read -r native_module; do
+  codesign --force --sign - "$native_module"
+done < "$NATIVE_LIST"
 codesign --force --deep --sign - "$APP_SOURCE"
 codesign --verify --deep --strict "$APP_SOURCE"
 APP_BINARY="$APP_SOURCE/Contents/MacOS/Hermes"
@@ -207,9 +222,6 @@ ELECTRON_RUNTIME_ARCH="$(ELECTRON_RUN_AS_NODE=1 sandbox-exec -p "$NO_NETWORK_PRO
   "$APP_BINARY" -p 'process.arch')"
 [ "$ELECTRON_RUNTIME_ARCH" = "$ARCH" ] || \
   fail "Electron runtime arch mismatch: expected=$ARCH actual=$ELECTRON_RUNTIME_ARCH"
-NATIVE_LIST="$WORK_DIR/desktop-native-modules.txt"
-find "$APP_SOURCE/Contents/Resources" -type f -name '*.node' -print > "$NATIVE_LIST"
-[ -s "$NATIVE_LIST" ] || fail "Desktop node-pty native binary missing"
 while IFS= read -r native_module; do
   native_info="$(file -b "$native_module")"
   printf '%s\n' "$native_info"

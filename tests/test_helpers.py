@@ -16,6 +16,7 @@ from manifest_tool import (  # noqa: E402
     verify_manifest,
 )
 from sanitize_site_packages import symlink_escapes_root  # noqa: E402
+from relocate_macho import inside, loader_relative  # noqa: E402
 
 
 class ManifestToolTests(unittest.TestCase):
@@ -107,6 +108,24 @@ class SanitizeSitePackagesTests(unittest.TestCase):
             self.assertFalse((dist_info / "direct_url.json").exists())
             self.assertFalse(cache.exists())
             self.assertTrue((root / "safe.pth").exists())
+
+
+class RelocateMachoTests(unittest.TestCase):
+    def test_loader_relative_uses_binary_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            binary = root / "bin" / "python3.11"
+            target = root / "lib" / "libpython3.11.dylib"
+            self.assertEqual(
+                loader_relative(str(target), binary),
+                "@loader_path/../lib/libpython3.11.dylib",
+            )
+
+    def test_inside_rejects_sibling_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve() / "runtime"
+            self.assertTrue(inside(str(root / "lib" / "safe.dylib"), root))
+            self.assertFalse(inside(str(root.parent / "outside.dylib"), root))
 
 
 if __name__ == "__main__":
